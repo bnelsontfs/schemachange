@@ -203,7 +203,7 @@ class SnowflakeSchemachangeSession:
     + "ORDER BY INSTALLED_ON DESC) FROM {database_name}.{schema_name}.{table_name} WHERE SCRIPT_TYPE = 'R' AND " \
     + "STATUS = 'Success'"
   _q_ch_fetch ="SELECT VERSION FROM {database_name}.{schema_name}.{table_name} WHERE SCRIPT_TYPE = 'V' ORDER" \
-    + " BY INSTALLED_ON DESC LIMIT 1"
+    + " BY INSTALLED_ON DESC"
   _q_sess_tag = "ALTER SESSION SET QUERY_TAG = '{query_tag}'"
   _q_ch_log = "INSERT INTO {database_name}.{schema_name}.{table_name} (VERSION, DESCRIPTION, SCRIPT, SCRIPT_TYPE, " \
     + "CHECKSUM, EXECUTION_TIME, STATUS, INSTALLED_BY, INSTALLED_ON) values ('{script_version}'," \
@@ -489,7 +489,7 @@ def deploy_command(config):
   # Log some additional details
   if config['dry_run']:
     print("Running in dry-run mode")
-  if config['out-of-order']:
+  if config['out_of_order']:
     print("Allowing migrations to run even if a later version has already been deployed (out of order mode)")
   
   print(_log_config_details.format(**config))
@@ -546,13 +546,13 @@ def deploy_command(config):
     if script_name[0] == 'V':
 
       # in out of order mode, only skip this script if it's already been applied
-      if config['out-of-order'] and script['script_version'] in change_history:
+      if config['out_of_order'] and script['script_version'] in change_history:
         if config['verbose']:
           print("Skipping change script %s because it has already been applied (out of order mode)" % script['script_name'])
         scripts_skipped +=1
         continue
 
-      if get_alphanum_key(script['script_version']) <= get_alphanum_key(max_published_version) and not config['out-of-order']:
+      if get_alphanum_key(script['script_version']) <= get_alphanum_key(max_published_version) and not config['out_of_order']:
         if config['verbose']:
           print("Skipping change script %s because it's older than the most recently applied change (%s)" % (script['script_name'], max_published_version))
         scripts_skipped += 1
@@ -655,7 +655,7 @@ def get_schemachange_config(config_file_path, root_folder, modules_folder, snowf
     "change_history_table":change_history_table, "vars":vars, \
     "create_change_history_table":create_change_history_table, \
     "autocommit":autocommit, "verbose":verbose, "dry_run":dry_run,\
-    "query_tag":query_tag, "oauth_config":oauth_config}
+    "query_tag":query_tag, "oauth_config":oauth_config, "out_of_order":out_of_order}
   cli_inputs = {k:v for (k,v) in cli_inputs.items() if v}
 
   # load YAML inputs and convert kebabs to snakes
@@ -668,7 +668,7 @@ def get_schemachange_config(config_file_path, root_folder, modules_folder, snowf
     "snowflake_account":None,  "snowflake_user":None, "snowflake_role":None,   \
     "snowflake_warehouse":None,  "snowflake_database":None,  "change_history_table":None,  \
     "vars":{}, "create_change_history_table":False, "autocommit":False, "verbose":False,  \
-    "dry_run":False , "query_tag":None , "oauth_config":None, out_of_order:False }
+    "dry_run":False , "query_tag":None , "oauth_config":None, "out_of_order":False }
   #insert defualt values for items not populated
   config.update({ k:v for (k,v) in config_defaults.items() if not k in config.keys()})
 
@@ -783,88 +783,6 @@ def get_change_history_table_details(change_history_table):
       raise ValueError("Invalid change history table name: %s" % change_history_table_override)
 
   return details
-
-def fetch_change_history_metadata(change_history_table, snowflake_session_parameters, autocommit, verbose):
-  # This should only ever return 0 or 1 rows
-  query = "SELECT CREATED, LAST_ALTERED FROM {0}.INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA ILIKE '{1}' AND TABLE_NAME ILIKE '{2}'".format(change_history_table['database_name'], change_history_table['schema_name'], change_history_table['table_name'])
-  results = execute_snowflake_query(change_history_table['database_name'], query, snowflake_session_parameters, autocommit, verbose)
-
-  # Collect all the results into a list
-  change_history_metadata = dict()
-  for cursor in results:
-    for row in cursor:
-      change_history_metadata['created'] = row[0]
-      change_history_metadata['last_altered'] = row[1]
-
-  return change_history_metadata
-
-def create_change_history_table_if_missing(change_history_table, snowflake_session_parameters, autocommit, verbose):
-  # Check if schema exists
-  query = "SELECT COUNT(1) FROM {0}.INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME ILIKE '{1}'".format(change_history_table['database_name'], change_history_table['schema_name'])
-  results = execute_snowflake_query(change_history_table['database_name'], query, snowflake_session_parameters, autocommit, verbose)
-  schema_exists = False
-  for cursor in results:
-    for row in cursor:
-      schema_exists = (row[0] > 0)
-
-  # Create the schema if it doesn't exist
-  if not schema_exists:
-    query = "CREATE SCHEMA {0}".format(change_history_table['schema_name'])
-    execute_snowflake_query(change_history_table['database_name'], query, snowflake_session_parameters, autocommit, verbose)
-
-  # Finally, create the change history table if it doesn't exist
-  query = "CREATE TABLE IF NOT EXISTS {0}.{1} (VERSION VARCHAR, DESCRIPTION VARCHAR, SCRIPT VARCHAR, SCRIPT_TYPE VARCHAR, CHECKSUM VARCHAR, EXECUTION_TIME NUMBER, STATUS VARCHAR, INSTALLED_BY VARCHAR, INSTALLED_ON TIMESTAMP_LTZ)".format(change_history_table['schema_name'], change_history_table['table_name'])
-  execute_snowflake_query(change_history_table['database_name'], query, snowflake_session_parameters, autocommit, verbose)
-
-def fetch_r_scripts_checksum(change_history_table, snowflake_session_parameters, autocommit, verbose):
-  query = f"SELECT DISTINCT SCRIPT, FIRST_VALUE(CHECKSUM) OVER (PARTITION BY SCRIPT ORDER BY INSTALLED_ON DESC) \
-          FROM {change_history_table['schema_name']}.{change_history_table['table_name']} \
-          WHERE SCRIPT_TYPE = 'R' AND STATUS = 'Success'"
-  results = execute_snowflake_query(change_history_table['database_name'], query, snowflake_session_parameters, autocommit, verbose)
-
-  # Collect all the results into a dict
-  d_script_checksum = DataFrame(columns=['script_name', 'checksum'])
-  script_names = []
-  checksums = []
-  for cursor in results:
-    for row in cursor:
-      script_names.append(row[0])
-      checksums.append(row[1])
-
-  d_script_checksum['script_name'] = script_names
-  d_script_checksum['checksum'] = checksums
-  return d_script_checksum
-
-def fetch_change_history(change_history_table, snowflake_session_parameters, autocommit, verbose):
-  query = "SELECT VERSION FROM {0}.{1} WHERE SCRIPT_TYPE = 'V' ORDER BY INSTALLED_ON DESC LIMIT 1".format(change_history_table['schema_name'], change_history_table['table_name'])
-  results = execute_snowflake_query(change_history_table['database_name'], query, snowflake_session_parameters, autocommit, verbose)
-
-  # Collect all the results into a list
-  change_history = list()
-  for cursor in results:
-    for row in cursor:
-      change_history.append(row[0])
-
-  return change_history
-
-def apply_change_script(script, script_content, vars, default_database, change_history_table, snowflake_session_parameters, autocommit, verbose):
-  # Define a few other change related variables
-  checksum = hashlib.sha224(script_content.encode('utf-8')).hexdigest()
-  execution_time = 0
-  status = 'Success'
-
-  # Execute the contents of the script
-  if len(script_content) > 0:
-    start = time.time()
-    session_parameters = snowflake_session_parameters.copy()
-    session_parameters["QUERY_TAG"] += ";%s" % script['script_name']
-    execute_snowflake_query(default_database, script_content, session_parameters, autocommit, verbose)
-    end = time.time()
-    execution_time = round(end - start)
-
-  # Finally record this change in the change history table
-  query = "INSERT INTO {0}.{1} (VERSION, DESCRIPTION, SCRIPT, SCRIPT_TYPE, CHECKSUM, EXECUTION_TIME, STATUS, INSTALLED_BY, INSTALLED_ON) values ('{2}','{3}','{4}','{5}','{6}',{7},'{8}','{9}',CURRENT_TIMESTAMP);".format(change_history_table['schema_name'], change_history_table['table_name'], script['script_version'], script['script_description'], script['script_name'], script['script_type'], checksum, execution_time, status, os.environ["SNOWFLAKE_USER"])
-  execute_snowflake_query(change_history_table['database_name'], query, snowflake_session_parameters, autocommit, verbose)
 
 def extract_config_secrets(config: Dict[str, Any]) -> Set[str]:
   """
