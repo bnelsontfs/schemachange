@@ -3,6 +3,51 @@ All notable changes to this project will be documented in this file.
 
 *The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).*
 
+## [3.6.0] - 2023-09-06
+### Changed
+- Fixed bug introduced in version 3.5.0 where the session state was not reset after a user script was run. This resulted in schemachange updates to the metadata table failing in some cases. schemachange will now reset the session back to the default settings after each user script is run
+- Updated the pytest GitHub Actions workflow
+- Cleaned up whitespace and formatting in files for consistency
+- Updated README file
+
+### Added
+- Added new dependency review GitHub Actions workflow
+- Added badges for pytest and PyPI
+
+
+## [3.5.4] - 2023-09-01
+### Changed
+- Fixed authentication workflow to check for authenticator type first, then for Key pair and finally default to password authentication.
+- Fixed the `Dockerfile-src` configuration to build a docker image from source code.
+- Updated README file.
+
+## [3.5.3] - 2023-07-18
+### Changed
+- Updated version dependencies for `snowflake-connector-python` and `pyyaml`.
+
+## [3.5.2] - 2023-02-14
+### Changed
+- Fixed bug (from the 3.5.0 release) that caused a crash when using verbose logging.
+
+## [3.5.1] - 2023-02-11
+### Changed
+- Fixed a bug when handling default values from the command line with arguments defined as `action='store_true'` (create-change-history-table, auto-commit, verbose, and dry-run).
+
+## [3.5.0] - 2023-01-29
+### Added
+- Added support for Oauth and external browser and Okta authentication methods.
+- Added `--oauth-config` to accept values for oauth configuration.
+### Changed
+- Inverted Program Call sequence and refactored all snowflake interactions into a Class. Class now persists connection accross all interactions and updates the snowflake query tag session variable as scripts are executed.
+- Cleaned up argument passing and other repetitive code using dictionary and set comparisons for easy maintenance. (Converted variable names to a consistent snake_case from a mix of kebab-case and snake_case)
+- Fixed change history table processing to allow mixed case names when '"' are used in the name.
+- Moved most error, log and warning messages and query strings to global or class variables.
+- Updated readme to cover new authentication methods
+
+## [3.4.2] - 2022-10-24
+### Changed
+- Updated `snowflake-connector-python` dependency to version 2.8. This should address errors with result batching in the `fetch_r_script_checksum` method when users have a lot of scripts in their project.
+
 ## [3.4.1] - 2021-12-08
 ### Added
 - Added a new optional parameter `--query-tag` to append a string to the QUERY_TAG that is attached to every SQL statement executed
